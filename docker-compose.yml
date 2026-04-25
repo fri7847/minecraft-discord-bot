@@ -1,0 +1,19 @@
+services:
+  bot:
+    build: .
+    container_name: minecraft-discord-bot
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOME}/docker/minecraft:/docker/minecraft
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - ADMIN_ROLE=${ADMIN_ROLE:-Minecraft Admin}
+      - RCON_PASSWORD=${RCON_PASSWORD:-mc-bot-rcon-pw}
+      - DOCKER_HOST=
+    networks:
+      - minecraft-network   # 마인크래프트 컨테이너에 RCON 으로 접근하기 위해 같은 네트워크에 붙임
+    restart: unless-stopped
+
+networks:
+  minecraft-network:
+    external: true   # docker_service.py가 미리 만들어 둔 네트워크 재사용

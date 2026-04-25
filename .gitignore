@@ -1,0 +1,30 @@
+# 비밀
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+credentials.json
+service-account*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# 마인크래프트 데이터 (호스트 마운트)
+docker/minecraft/
+
+# 로그
+*.log
