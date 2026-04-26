@@ -117,10 +117,12 @@ class Settings:
     PORT_START = 25565
     PORT_END = 25999
 
-    # simple-voice-chat UDP 포트. mc_port 와 같은 offset 으로 할당하여
-    # 한 호스트에 여러 voicechat 서버가 동시에 떠도 충돌 안 나도록 함.
-    # 예: mc_port=25565 → voice_port=24454, mc_port=25566 → voice_port=24455.
-    VOICE_PORT_BASE = 24454
+    # simple-voice-chat UDP 포트 = MC 본 포트(TCP)와 동일 번호로 통합.
+    # MC 는 TCP 25565, voicechat 은 UDP 25565 — 프로토콜이 달라 OS 충돌 없음.
+    # ENABLE_QUERY=FALSE 와 짝으로 동작 (query 가 켜지면 25565/UDP 를 마크가 잡아 충돌).
+    # 사용자가 외부 방화벽·포트포워딩에서 한 포트만 열어도 마크와 마이크 모두 통과.
+    # 이전엔 24454+offset 별도 포트였는데 운영상 외부 포트 추가 개방 누락이 잦아 통합.
+    VOICE_PORT_BASE = 25565
 
     # 로더별 simple-voice-chat config 파일 상대 경로 (컨테이너 안 /data/ 기준).
     # 봇이 컨테이너 만들기 전에 미리 host 측에 voicechat-server.properties 를 써넣어

@@ -11,7 +11,11 @@ from config.settings import Settings
 
 
 def voice_port_for(mc_port: int) -> int:
-    """mc port 와 같은 offset 의 voicechat UDP port. 한 호스트에 여러 voicechat 동시 운영 가능."""
+    """voicechat UDP port = MC TCP port 동일 번호 (정책상 통합).
+
+    VOICE_PORT_BASE == PORT_START 이므로 결과적으로 mc_port 그대로 반환됨.
+    수식 형태는 옥 정책(별도 base)을 다시 켜고 싶을 때 한 줄만 바꾸면 되도록 보존.
+    """
     return Settings.VOICE_PORT_BASE + (mc_port - Settings.PORT_START)
 
 
@@ -346,6 +350,8 @@ class DockerService:
             "ENABLE_RCON": "TRUE",
             "RCON_PASSWORD": Settings.RCON_PASSWORD,
             "RCON_PORT": str(Settings.RCON_PORT),
+            # voicechat 이 25565/UDP 를 잡으므로 마크 server query(25565/UDP) 와 충돌 막기 위해 강제 OFF.
+            "ENABLE_QUERY": "FALSE",
         }
 
         # itzg env 매핑 (None 이면 키 자체를 안 넣어 itzg 기본값에 맡김).
@@ -431,7 +437,7 @@ class DockerService:
                 volume_path: {"bind": "/data", "mode": "rw"},
                 mods_path: {"bind": "/mods", "mode": "rw"},
             },
-            # 25565/tcp = MC 게임 포트, 24454/udp = simple-voice-chat 음성 포트.
+            # 25565/tcp = MC 게임 포트, 같은 번호 UDP = simple-voice-chat (프로토콜이 달라 충돌 없음).
             # voicechat 의 listen port 를 voice_port 로 강제(properties)했으므로
             # host:voice_port/UDP → container:voice_port/UDP 로 1:1 매핑.
             ports={"25565/tcp": port, f"{voice_port}/udp": voice_port},
