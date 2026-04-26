@@ -21,6 +21,8 @@ class ServerService:
         mod_loader: str = "VANILLA",
         version: Optional[str] = None,    # None → Settings.DEFAULT_VERSION
         enable_anti_xray: bool = True,
+        # 사용자 명시 host port. None → 자동 할당 (PORT_START 부터 빈 곳).
+        port: Optional[int] = None,
         # itzg env 옵션 — None 이면 itzg 기본값.
         difficulty: Optional[str] = None,
         gamemode: Optional[str] = None,
@@ -59,10 +61,17 @@ class ServerService:
         if len(containers) >= 50:  # Global limit
             return False, "최대 서버 개수(50개)에 도달했습니다", None
 
-        # Allocate port
-        port = self.port_manager.allocate()
-        if port is None:
-            return False, "사용 가능한 포트가 없습니다", None
+        # 사용자가 port 명시한 경우 그 포트, 미지정이면 자동 할당.
+        if port is not None:
+            if not self.port_manager.allocate_specific(port):
+                return False, (
+                    f"포트 {port} 를 할당할 수 없습니다 — 이미 다른 서버가 점유 중이거나 "
+                    f"허용 범위({Settings.PORT_START}~{Settings.PORT_END}) 밖입니다"
+                ), None
+        else:
+            port = self.port_manager.allocate()
+            if port is None:
+                return False, "사용 가능한 포트가 없습니다", None
 
         try:
             ver = (version or Settings.DEFAULT_VERSION).strip() or Settings.DEFAULT_VERSION
@@ -91,8 +100,15 @@ class ServerService:
             self.port_manager.release(port)
             return False, f"서버 생성에 실패했습니다: {str(e)}", None
 
-    async def start_server(self, name: str, max_port_retries: int = 5) -> tuple[bool, Optional[str]]:
-        """Start a server. host port 충돌 시 다음 사용 가능 포트로 자동 재할당."""
+    async def start_server(
+        self, name: str, port: Optional[int] = None
+    ) -> tuple[bool, Optional[str]]:
+        """Start a server. port 명시 시 host 매핑이 다르면 데이터 보존 재생성 후 start.
+
+        port=None: 현재 컨테이너 매핑 그대로 시작 (가장 흔한 사용).
+        port 명시: 그 포트와 다르면 컨테이너만 새 포트 매핑으로 재생성 (월드 데이터 그대로 보존).
+        port 충돌·실패 시 데이터를 절대 지우지 않음 — 사용자에게 에러로 안내.
+        """
         existing = await self.docker_service.get_status(name)
         if not existing:
             return False, f"'{name}' 서버를 찾을 수 없습니다"
@@ -100,38 +116,44 @@ class ServerService:
         if existing["status"] == "running":
             return False, f"'{name}' 서버는 이미 실행 중입니다"
 
-        for attempt in range(max_port_retries):
-            try:
-                success = await self.docker_service.start_container(name)
-            except docker.errors.APIError as e:
-                if "address already in use" not in str(e):
-                    return False, f"'{name}' 서버 시작 실패: {e}"
-                # 호스트 외부(WSL/Windows 등) 가 포트 점유 → 컨테이너 재생성으로 다른 포트 받기.
-                stale = await self.docker_service.get_status(name)
-                old_port = stale.get("port") if stale else None
-                if old_port:
-                    self.port_manager.mark_unusable(old_port)
-                # 컨테이너 재생성 — 같은 이름, 새 포트
-                stale_full = await self.docker_service.get_status(name) or {}
-                loader = stale_full.get("mod_loader", "VANILLA")
-                version = stale_full.get("version", Settings.DEFAULT_VERSION)
-                await self.docker_service.delete_container(name)
-                new_port = self.port_manager.allocate()
-                if new_port is None:
-                    return False, "사용 가능한 포트가 없습니다"
-                try:
-                    await self.docker_service.create_container(
-                        name, new_port, mod_loader=loader, version=version, enable_anti_xray=True,
-                    )
-                except Exception as e2:
-                    self.port_manager.release(new_port)
-                    return False, f"포트 재할당 후 컨테이너 재생성 실패: {e2}"
-                continue   # 새 포트로 다시 start 시도
-            else:
-                if success:
-                    return True, None
-                return False, f"'{name}' 서버 시작에 실패했습니다"
-        return False, f"호스트 포트 충돌이 {max_port_retries}회 이어져 시작 실패 — 호스트의 25565 부근 점유 프로세스 확인 필요"
+        current_port = existing.get("port")
+
+        # port 명시 + 현재 매핑과 다르면 데이터 보존 재생성
+        if port is not None and port != current_port:
+            if not (Settings.PORT_START <= port <= Settings.PORT_END):
+                return False, (
+                    f"포트 {port} 가 허용 범위({Settings.PORT_START}~{Settings.PORT_END}) 밖입니다"
+                )
+            # 새 포트 점유 등록 (기존 점유 서버가 있으면 거부)
+            if not self.port_manager.allocate_specific(port):
+                return False, (
+                    f"포트 {port} 가 이미 다른 서버에 할당되어 있습니다. "
+                    f"`/list` 로 확인하거나 다른 포트를 지정하세요."
+                )
+            ok, err = await self.docker_service.recreate_with_new_port(name, new_port=port)
+            if not ok:
+                self.port_manager.release(port)
+                return False, err
+            # 옥 포트 해제
+            if current_port:
+                self.port_manager.release(current_port)
+
+        # 실제 start 시도. 호스트 충돌 시엔 데이터를 건드리지 않고 사용자에게 에러로 알림.
+        try:
+            success = await self.docker_service.start_container(name)
+        except docker.errors.APIError as e:
+            if "address already in use" in str(e):
+                effective = port if port is not None else current_port
+                return False, (
+                    f"호스트 포트 {effective} 가 이미 점유돼 시작 실패. "
+                    f"`/start name:{name} port:<다른포트>` 로 다른 포트 지정해 다시 시도하세요. "
+                    f"(월드 데이터는 보존됩니다)"
+                )
+            return False, f"'{name}' 서버 시작 실패: {e}"
+
+        if success:
+            return True, None
+        return False, f"'{name}' 서버 시작에 실패했습니다"
 
     async def stop_server(self, name: str) -> tuple[bool, Optional[str]]:
         """Stop a server."""

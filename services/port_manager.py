@@ -49,6 +49,15 @@ class PortManager:
                 return port
         return None
 
+    def allocate_specific(self, port: int) -> bool:
+        """사용자가 명시한 특정 포트를 할당. 이미 점유됐거나 범위 밖이면 False."""
+        if not (self.start <= port <= self.end):
+            return False
+        if port in self.allocated:
+            return False
+        self.allocated.add(port)
+        return True
+
     def mark_unusable(self, port: int) -> None:
         """포트를 영구 점유 마킹 (docker 외부 — WSL2 의 Windows 측 등 — 가 잡은 포트).
 

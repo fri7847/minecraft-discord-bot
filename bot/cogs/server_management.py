@@ -63,6 +63,7 @@ class ServerManagement(commands.Cog):
         name="서버 이름 (영문/숫자/_/-, 최대 32자)",
         mod_loader="모드 로더 종류 (생략 시 Paper)",
         version=f"마인크래프트 버전 (생략 시 {Settings.DEFAULT_VERSION}, 예: 1.21.4 / LATEST)",
+        port=f"호스트 포트 ({Settings.PORT_START}~{Settings.PORT_END}, 생략 시 자동 할당)",
         difficulty="난이도",
         gamemode="기본 게임 모드",
         max_players="최대 동시 접속 인원 (1~100)",
@@ -91,6 +92,7 @@ class ServerManagement(commands.Cog):
         name: str,
         mod_loader: app_commands.Choice[str] | None = None,
         version: str | None = None,
+        port: app_commands.Range[int, Settings.PORT_START, Settings.PORT_END] | None = None,
         difficulty: app_commands.Choice[str] | None = None,
         gamemode: app_commands.Choice[str] | None = None,
         max_players: app_commands.Range[int, 1, 100] | None = None,
@@ -135,6 +137,7 @@ class ServerManagement(commands.Cog):
                 mod_loader=loader_value,
                 version=version_value,
                 enable_anti_xray=True,
+                port=port,
                 difficulty=difficulty.value if difficulty else None,
                 gamemode=gamemode.value if gamemode else None,
                 max_players=max_players,
@@ -188,18 +191,26 @@ class ServerManagement(commands.Cog):
     # /start — 컨테이너 start 직후가 아니라 실제 RCON 응답까지 기다린 뒤 알림
     # ------------------------------------------------------------------ #
     @app_commands.command(name="start", description="마인크래프트 서버를 시작합니다")
-    @app_commands.describe(name="시작할 서버 이름")
+    @app_commands.describe(
+        name="시작할 서버 이름",
+        port=f"호스트 포트 변경 ({Settings.PORT_START}~{Settings.PORT_END}, 생략 시 기존 매핑 유지). 다르게 지정하면 데이터 보존한 채 컨테이너만 재생성.",
+    )
     @app_commands.default_permissions(manage_guild=True)
-    async def start_server(self, interaction: discord.Interaction, name: str):
+    async def start_server(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        port: app_commands.Range[int, Settings.PORT_START, Settings.PORT_END] | None = None,
+    ):
         await interaction.response.defer(thinking=True)
 
         progress = await interaction.followup.send(
-            f"🟡 '{name}' 서버 시작 중...",
+            f"🟡 '{name}' 서버 시작 중..." + (f" (포트 {port} 로 변경)" if port else ""),
             wait=True,
         )
 
         try:
-            success, error = await self.server_service.start_server(name)
+            success, error = await self.server_service.start_server(name, port=port)
             if not success:
                 await progress.edit(content=format_error(error))
                 return
@@ -484,13 +495,13 @@ class ServerManagement(commands.Cog):
                 "`/create name:<이름> [옵션...]` — 새 서버 생성\n"
                 "  · 필수: `name`\n"
                 "  · 기본 옵션: `mod_loader` (생략=Paper), `version` (생략="
-                f"{Settings.DEFAULT_VERSION})\n"
+                f"{Settings.DEFAULT_VERSION}), `port` (생략=자동)\n"
                 "  · 게임플레이: `difficulty`, `gamemode`, `pvp`, `hardcore`, `allow_nether`, `max_players`, `motd`\n"
                 "  · 월드: `level_type` (일반/평지/큰바이옷/증폭), `seed` (생략 시 매번 새 랜덤 맵)\n"
                 "  · 성능/네트워크: `view_distance` (3~32), `spawn_protection`, `ram_gb` (1~4), `online_mode`, `whitelist`\n"
                 "  · 자동 설치: 안티 X-ray + 마이크 모드(simple-voice-chat). PAPER 는 X-ray 자동 ban (MinerTrack)\n"
                 "    └ Vanilla 만 모드 시스템이 없어 자동 설치 불가\n"
-                "`/start name:<이름>` — 서버 시작\n"
+                "`/start name:<이름> [port:<포트>]` — 서버 시작. port 지정 시 데이터 보존한 채 포트 변경\n"
                 "`/stop name:<이름>` — 서버 정지\n"
                 "`/delete name:<이름>` — 서버 삭제 (월드 데이터까지 영구 삭제)\n"
             ),

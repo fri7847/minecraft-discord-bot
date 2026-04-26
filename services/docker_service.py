@@ -475,6 +475,65 @@ class DockerService:
         except NotFound:
             return False
 
+    async def recreate_with_new_port(self, name: str, new_port: int) -> tuple[bool, Optional[str]]:
+        """기존 컨테이너의 환경변수·이미지를 그대로 보존하면서 host port 만 바꿐 재생성.
+
+        docker port 매핑은 컨테이너 생성 시 고정 — 런타임 변경 불가. 사용자가 다른 포트로
+        시작하고 싶을 때 데이터(/docker/minecraft/<name>) 는 절대 건드리지 않고 컨테이너만
+        새 매핑으로 다시 만든다. delete_container 는 데이터까지 지우므로 여기선 사용 안 함.
+
+        voice port 도 정책상 mc port = voice port 통합이라 같이 따라가며,
+        voicechat-server.properties 의 port·voice_host 도 새 값으로 갱신한다.
+        """
+        try:
+            old = self.client.containers.get(name)
+        except NotFound:
+            return False, f"'{name}' 컨테이너를 찾을 수 없습니다"
+
+        env_list = old.attrs["Config"]["Env"]
+        image = old.attrs["Config"]["Image"]
+
+        loader = "VANILLA"
+        for entry in env_list:
+            if entry.startswith("TYPE="):
+                loader = entry.split("=", 1)[1].upper()
+                break
+
+        new_voice_port = voice_port_for(new_port)
+        # voicechat properties 갱신 (port·voice_host) — 데이터는 안 건드림
+        write_voicechat_config(name, loader, new_voice_port)
+
+        try:
+            if old.status == "running":
+                old.stop(timeout=30)
+            old.remove()
+        except Exception as e:
+            return False, f"옥 컨테이너 정리 실패: {e}"
+
+        volume_path = f"/docker/minecraft/{name}"
+        mods_path = f"/docker/minecraft/{name}/mods"
+        try:
+            self.client.containers.create(
+                image=image,
+                name=name,
+                environment=env_list,
+                volumes={
+                    volume_path: {"bind": "/data", "mode": "rw"},
+                    mods_path: {"bind": "/mods", "mode": "rw"},
+                },
+                ports={"25565/tcp": new_port, f"{new_voice_port}/udp": new_voice_port},
+                network="minecraft-network",
+                dns=["8.8.8.8", "1.1.1.1"],
+                restart_policy={"Name": "on-failure", "MaximumRetryCount": 3},
+                cap_drop=["NET_ADMIN", "SYS_ADMIN"],
+                cap_add=["CHOWN", "SETUID", "SETGID"],
+                security_opt=["no-new-privileges:true"],
+                detach=True,
+            )
+        except Exception as e:
+            return False, f"새 포트({new_port}) 로 컨테이너 재생성 실패: {e}"
+        return True, None
+
     async def stop_container(self, name: str) -> bool:
         """Stop a container by name."""
         try:
