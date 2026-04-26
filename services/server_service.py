@@ -1,4 +1,5 @@
 from typing import Optional, Dict, Any
+import docker.errors
 from .docker_service import DockerService
 from .port_manager import PortManager
 from bot.utils.validators import validate_server_name
@@ -18,8 +19,23 @@ class ServerService:
         guild_id: int,
         user_id: int,
         mod_loader: str = "VANILLA",
-        version: str = "LATEST",
+        version: Optional[str] = None,    # None → Settings.DEFAULT_VERSION
         enable_anti_xray: bool = True,
+        # itzg env 옵션 — None 이면 itzg 기본값.
+        difficulty: Optional[str] = None,
+        gamemode: Optional[str] = None,
+        max_players: Optional[int] = None,
+        motd: Optional[str] = None,
+        pvp: Optional[bool] = None,
+        level_type: Optional[str] = None,
+        seed: Optional[str] = None,
+        hardcore: Optional[bool] = None,
+        allow_nether: Optional[bool] = None,
+        view_distance: Optional[int] = None,
+        spawn_protection: Optional[int] = None,
+        online_mode: Optional[bool] = None,
+        ram_gb: Optional[int] = None,
+        whitelist: Optional[bool] = None,
     ) -> tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
         """Create a new Minecraft server with validation and limits."""
         # Validate name
@@ -55,14 +71,28 @@ class ServerService:
                 mod_loader=loader,
                 version=ver,
                 enable_anti_xray=enable_anti_xray,
+                difficulty=difficulty,
+                gamemode=gamemode,
+                max_players=max_players,
+                motd=motd,
+                pvp=pvp,
+                level_type=level_type,
+                seed=seed,
+                hardcore=hardcore,
+                allow_nether=allow_nether,
+                view_distance=view_distance,
+                spawn_protection=spawn_protection,
+                online_mode=online_mode,
+                ram_gb=ram_gb,
+                whitelist=whitelist,
             )
             return True, None, result
         except Exception as e:
             self.port_manager.release(port)
             return False, f"서버 생성에 실패했습니다: {str(e)}", None
 
-    async def start_server(self, name: str) -> tuple[bool, Optional[str]]:
-        """Start a server."""
+    async def start_server(self, name: str, max_port_retries: int = 5) -> tuple[bool, Optional[str]]:
+        """Start a server. host port 충돌 시 다음 사용 가능 포트로 자동 재할당."""
         existing = await self.docker_service.get_status(name)
         if not existing:
             return False, f"'{name}' 서버를 찾을 수 없습니다"
@@ -70,10 +100,38 @@ class ServerService:
         if existing["status"] == "running":
             return False, f"'{name}' 서버는 이미 실행 중입니다"
 
-        success = await self.docker_service.start_container(name)
-        if success:
-            return True, None
-        return False, f"'{name}' 서버 시작에 실패했습니다"
+        for attempt in range(max_port_retries):
+            try:
+                success = await self.docker_service.start_container(name)
+            except docker.errors.APIError as e:
+                if "address already in use" not in str(e):
+                    return False, f"'{name}' 서버 시작 실패: {e}"
+                # 호스트 외부(WSL/Windows 등) 가 포트 점유 → 컨테이너 재생성으로 다른 포트 받기.
+                stale = await self.docker_service.get_status(name)
+                old_port = stale.get("port") if stale else None
+                if old_port:
+                    self.port_manager.mark_unusable(old_port)
+                # 컨테이너 재생성 — 같은 이름, 새 포트
+                stale_full = await self.docker_service.get_status(name) or {}
+                loader = stale_full.get("mod_loader", "VANILLA")
+                version = stale_full.get("version", Settings.DEFAULT_VERSION)
+                await self.docker_service.delete_container(name)
+                new_port = self.port_manager.allocate()
+                if new_port is None:
+                    return False, "사용 가능한 포트가 없습니다"
+                try:
+                    await self.docker_service.create_container(
+                        name, new_port, mod_loader=loader, version=version, enable_anti_xray=True,
+                    )
+                except Exception as e2:
+                    self.port_manager.release(new_port)
+                    return False, f"포트 재할당 후 컨테이너 재생성 실패: {e2}"
+                continue   # 새 포트로 다시 start 시도
+            else:
+                if success:
+                    return True, None
+                return False, f"'{name}' 서버 시작에 실패했습니다"
+        return False, f"호스트 포트 충돌이 {max_port_retries}회 이어져 시작 실패 — 호스트의 25565 부근 점유 프로세스 확인 필요"
 
     async def stop_server(self, name: str) -> tuple[bool, Optional[str]]:
         """Stop a server."""

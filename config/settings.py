@@ -24,16 +24,32 @@ class Settings:
     # 항상 java21 이미지로 강제하는 로더 (BuildTools 가 신 Java 거부)
     JAVA21_REQUIRED_LOADERS = {"SPIGOT", "BUKKIT", "CRAFTBUKKIT"}
 
-    # 기본 버전 — itzg는 LATEST/lastest 모두 LATEST로 받지만 표준은 LATEST
-    DEFAULT_VERSION = "LATEST"
+    # 기본 버전 — 운영 정책상 26.1.2 고정 (사용자 결정).
+    # LATEST 로 두면 itzg 가 신 버전(26.1.2+) 으로 풀어 자동 설치 플러그인 호환이 깨질 수 있어
+    # 명시 버전 으로 둔다. 사용자가 /create version 옵션에 명시하면 그 값이 우선.
+    DEFAULT_VERSION = "26.1.2"
+
+    # 로더별로 26.1.2 가 호환 안 되는 경우 자동 폴백 (사용자가 version 명시 시엔 그 값이 우선).
+    # - FORGE: Forge 가 mc 26.1.x 빌드를 안 함 (NeoForge 로 갈라진 후 정체). anti-xray forge 빌드도 1.20.4 가 마지막.
+    # - QUILT: simple-voice-chat 의 quilt 빌드가 1.21.1 까지만 (이후 fabric jar 만 만듬, jar-in-jar QSL 충돌 회피).
+    # - NEOFORGE: NeoForge 의 26.1.x 빌드는 모두 -beta 표시라 itzg install-neoforge 가 stable 못 찾음.
+    LOADER_VERSION_OVERRIDE = {
+        "FORGE":    "1.20.4",
+        "QUILT":    "1.21.1",
+        "NEOFORGE": "1.21.1",
+    }
 
     # 로더별 안티 X-ray 자동 설치 매핑 (Modrinth 프로젝트 slug)
     # 콤마로 구분하면 의존 모드도 함께 다운로드됨
+    # PAPER/SPIGOT/BUKKIT 계열: NeoAntiXray (Orebfuscator 가 26.1.2 호환 jar 안 올림 → 교체).
+    # NeoAntiXray 는 ProtocolLib 의존성 없음.
+    # PAPER 는 추가로 MinerTrack 을 함께 설치 — 광맥 의심 패턴 탐지 시 자동 ban.
+    # MinerTrack 은 Paper API 의존이라 SPIGOT/BUKKIT/Folia 외 로더엔 설치 불가.
     ANTI_XRAY_PROJECTS = {
-        "PAPER":      "orebfuscator",
-        "SPIGOT":     "orebfuscator",
-        "BUKKIT":     "orebfuscator",
-        "CRAFTBUKKIT":"orebfuscator",
+        "PAPER":      "neoantixray,minertrack",
+        "SPIGOT":     "neoantixray",
+        "BUKKIT":     "neoantixray",
+        "CRAFTBUKKIT":"neoantixray",
         "FORGE":      "anti-xray",
         "NEOFORGE":   "anti-xray",
         "FABRIC":     "anti-xray,fabric-api",   # AntiXray 가 Fabric API 필요
@@ -41,21 +57,39 @@ class Settings:
         # VANILLA 는 모드/플러그인을 못 받으므로 자동 설치 불가
     }
 
-    # SpigotMC 리소스 ID (Modrinth에 없는 의존성). itzg SPIGET_RESOURCES 환경변수로 처리
-    # Bukkit/Spigot/Paper의 Orebfuscator 는 ProtocolLib(1997) 필요
-    ANTI_XRAY_SPIGET_DEPS = {
-        "PAPER":      "1997",
-        "SPIGOT":     "1997",
-        "BUKKIT":     "1997",
-        "CRAFTBUKKIT":"1997",
+    # MinerTrack 자동 밴 설정 — PAPER 전용. 컨테이너 첫 부팅 전 미리 써둘.
+    # 기본 config 에 xray.commands.7 = ban %player% 를 추가해서 VL 7 도달 시 영구 ban.
+    # 기본값은 VL 5 = kick 까지만 있으므로 ban 은 추가 정책.
+    MINERTRACK_CONFIG_PATH = "plugins/MinerTrack/config.yml"
+
+    # SpigotMC 리소스 ID (Modrinth 에 없는 의존성). itzg SPIGET_RESOURCES 환경변수로 처리.
+    # NeoAntiXray 로 바꿄 후엔 ProtocolLib 같은 anti-xray 의존성이 없어 비어 있음.
+    # (Bukkit 계열 spark 자동 설치는 ALWAYS_INSTALL_SPIGET_BY_LOADER 가 처리)
+    ANTI_XRAY_SPIGET_DEPS = {}
+
+    # 모든 비-VANILLA 서버에 자동 설치할 Modrinth 프로젝트.
+    # 여기 들어가는 slug 는 simple-voice-chat 처럼 모든 로더(fabric/paper/bukkit/...) 빌드를 가진 것만.
+    ALWAYS_INSTALL_MODRINTH = [
+        "simple-voice-chat",   # Henkelmax 공식 음성채팅 — mod + plugin 모두 같은 slug
+    ]
+
+    # 모드 로더 jar 만 Modrinth 에 있는 프로젝트 (Bukkit 계열은 SpigetMC 로 따로 받아야 함).
+    # 예: spark 의 paper/spigot/bukkit jar 는 Modrinth 에 없고 SpigetMC 57242 에 있음.
+    # QUILT: spark 의 quilt 빌드는 1.19.2 가 마지막이라 자동 설치에서 제외.
+    ALWAYS_INSTALL_MODRINTH_BY_LOADER = {
+        "FABRIC":   ["spark"],
+        "FORGE":    ["spark"],
+        "NEOFORGE": ["spark"],
     }
 
-    # 모든 서버에 항상 설치할 Modrinth 프로젝트 (VANILLA 는 자동 제외)
-    # itzg가 컨테이너 TYPE에 맞는 mod/plugin 변형을 자동 선택
-    ALWAYS_INSTALL_MODRINTH = [
-        "simple-voice-chat",   # Henkelmax 공식 음성채팅 (mod + plugin 모두 같은 slug)
-        "spark",               # 성능 프로파일러 — /tps 명령에 사용 (모든 로더 지원)
-    ]
+    # Bukkit 계열 자동 설치 SpigetMC 리소스 (anti-xray 의존성과 별개로 추가).
+    # PAPER 는 1.21+ 부터 spark profiler 를 서버 jar 에 번들하므로 (FileProviderSource 가
+    # "will not be loaded" 처리) 외부 다운로드 불필요. SPIGOT/BUKKIT/CRAFTBUKKIT 만 필요.
+    ALWAYS_INSTALL_SPIGET_BY_LOADER = {
+        "SPIGOT":     ["57242"],   # spark
+        "BUKKIT":     ["57242"],
+        "CRAFTBUKKIT":["57242"],
+    }
 
     # RCON — /sayall, /tps 등 봇이 게임 안에 명령 보낼 때 사용
     # 컨테이너마다 달라지지 않게 단일 비밀번호 (봇과 마인크래프트 컨테이너만 같은 docker network라 외부 노출 X)
@@ -66,8 +100,30 @@ class Settings:
     VOLUME_BASE_PATH = os.path.expanduser("~/docker/minecraft")
 
     # Port allocation
+    # 호스트 측에서 다른 프로세스가 25565~ 점유한 경우 start_server 의 자동 재시도가
+    # 다음 사용 가능 포트로 컨테이너를 재생성한다.
     PORT_START = 25565
     PORT_END = 25999
+
+    # simple-voice-chat UDP 포트. mc_port 와 같은 offset 으로 할당하여
+    # 한 호스트에 여러 voicechat 서버가 동시에 떠도 충돌 안 나도록 함.
+    # 예: mc_port=25565 → voice_port=24454, mc_port=25566 → voice_port=24455.
+    VOICE_PORT_BASE = 24454
+
+    # 로더별 simple-voice-chat config 파일 상대 경로 (컨테이너 안 /data/ 기준).
+    # 봇이 컨테이너 만들기 전에 미리 host 측에 voicechat-server.properties 를 써넣어
+    # voicechat 가 voice_port 로 listen 하게 강제한다.
+    VOICECHAT_CONFIG_PATH = {
+        "PAPER":      "plugins/voicechat/voicechat-server.properties",
+        "SPIGOT":     "plugins/voicechat/voicechat-server.properties",
+        "BUKKIT":     "plugins/voicechat/voicechat-server.properties",
+        "CRAFTBUKKIT":"plugins/voicechat/voicechat-server.properties",
+        "FABRIC":     "config/voicechat/voicechat-server.properties",
+        "FORGE":      "config/voicechat/voicechat-server.properties",
+        "NEOFORGE":   "config/voicechat/voicechat-server.properties",
+        "QUILT":      "config/voicechat/voicechat-server.properties",
+        # VANILLA 는 voicechat 설치 자체가 안 되므로 매핑 없음.
+    }
 
     # Resource limits
     MAX_CONTAINERS_PER_GUILD = 10
