@@ -19,14 +19,21 @@ bot = commands.Bot(
 @bot.event
 async def on_ready():
     """봇이 준비됐을 때 호출됩니다."""
-    print(f"로그인 완료: {bot.user.name} ({bot.user.id})")
-    print(f"{len(bot.guilds)}개의 길드에 연결되었습니다")
+    print(f"로그인 완료: {bot.user.name} ({bot.user.id})", flush=True)
+    print(f"{len(bot.guilds)}개의 길드에 연결되었습니다", flush=True)
 
-    try:
-        synced = await bot.tree.sync()
-        print(f"{len(synced)}개의 슬래시 명령을 동기화했습니다.")
-    except Exception as e:
-        print(f"슬래시 명령 동기화 실패: {e}")
+    # Guild-scoped sync — 즉시 반영 (global sync 는 디스코드가 최대 1시간 캐시).
+    # 봇이 들어간 모든 길드에 글로벌 명령 트리를 카피한 뒤 그 길드에 sync.
+    total = 0
+    for guild in bot.guilds:
+        try:
+            bot.tree.copy_global_to(guild=guild)
+            synced = await bot.tree.sync(guild=guild)
+            total += len(synced)
+            print(f"  - 길드 '{guild.name}': {len(synced)}개 명령 동기화", flush=True)
+        except Exception as e:
+            print(f"  - 길드 '{guild.name}' 동기화 실패: {e}", flush=True)
+    print(f"총 {total}개 슬래시 명령 동기화 완료", flush=True)
 
 
 @bot.tree.error
