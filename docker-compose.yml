@@ -4,7 +4,11 @@ services:
     container_name: minecraft-discord-bot
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${HOME}/docker/minecraft:/docker/minecraft
+      # 봇이 자식 컨테이너에 만든 데이터(/docker/minecraft/<name>/) 를 직접 읽고 쓸 수 있도록
+      # 호스트 절대경로로 통일. 이전 ${HOME}/docker/minecraft 마운트는 docker_service 가
+      # 자식 컨테이너 bind path 로 쓰는 /docker/minecraft 와 어긋나 mods/voicechat config
+      # 패치가 불가능했음.
+      - /docker/minecraft:/docker/minecraft
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - ADMIN_ROLE=${ADMIN_ROLE:-Minecraft Admin}
