@@ -41,12 +41,14 @@ class Settings:
 
     # 로더별 안티 X-ray 자동 설치 매핑 (Modrinth 프로젝트 slug)
     # 콤마로 구분하면 의존 모드도 함께 다운로드됨
-    # PAPER/SPIGOT/BUKKIT 계열: NeoAntiXray (Orebfuscator 가 26.1.2 호환 jar 안 올림 → 교체).
-    # NeoAntiXray 는 ProtocolLib 의존성 없음.
-    # PAPER 는 추가로 MinerTrack 을 함께 설치 — 광맥 의심 패턴 탐지 시 자동 ban.
-    # MinerTrack 은 Paper API 의존이라 SPIGOT/BUKKIT/Folia 외 로더엔 설치 불가.
+    # PAPER: Paper 내장 anti-xray (engine-mode 2) 가 진짜 obfuscation 을 담당 →
+    #        Modrinth 플러그인은 detection 역할인 minertrack 만 설치 (자동 ban 까지).
+    #        NeoAntiXray 는 사실 detection-only 라 obfuscation 효과 0 — 빼버림.
+    # SPIGOT/BUKKIT 계열: 26.1.x 호환 obfuscation 플러그인이 Modrinth 에 사실상 없어
+    #        neoantixray (detection-only) 라도 깔아 의심 패턴 알림이라도 받게 둘.
+    #        진짜 X-ray 차단을 원하면 Paper 로 갈아타는 게 답.
     ANTI_XRAY_PROJECTS = {
-        "PAPER":      "neoantixray,minertrack",
+        "PAPER":      "minertrack",
         "SPIGOT":     "neoantixray",
         "BUKKIT":     "neoantixray",
         "CRAFTBUKKIT":"neoantixray",
@@ -61,6 +63,16 @@ class Settings:
     # 기본 config 에 xray.commands.7 = ban %player% 를 추가해서 VL 7 도달 시 영구 ban.
     # 기본값은 VL 5 = kick 까지만 있으므로 ban 은 추가 정책.
     MINERTRACK_CONFIG_PATH = "plugins/MinerTrack/config.yml"
+
+    # Paper 내장 anti-xray obfuscation 활성화 — paper-world-defaults.yml 의
+    # anti-xray 섹션을 enabled=true, engine-mode=2 로 패치해서 미리 박음.
+    # itzg 가 부팅 시 같은 파일을 GitHub(Shonz1) 에서 다시 받아 덮어쓰므로
+    # SKIP_DOWNLOAD_DEFAULTS=TRUE 도 함께 켜서 막아야 우리 파일이 살아남는다.
+    PAPER_WORLD_DEFAULTS_PATH = "config/paper-world-defaults.yml"
+    PAPER_WORLD_DEFAULTS_URL = (
+        "https://raw.githubusercontent.com/Shonz1/minecraft-default-configs/"
+        "main/{version}/paper-world-defaults.yml"
+    )
 
     # SpigotMC 리소스 ID (Modrinth 에 없는 의존성). itzg SPIGET_RESOURCES 환경변수로 처리.
     # NeoAntiXray 로 바꿄 후엔 ProtocolLib 같은 anti-xray 의존성이 없어 비어 있음.
